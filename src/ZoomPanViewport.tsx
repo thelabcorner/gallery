@@ -24,6 +24,22 @@ type Velocity = {
   y: number
 }
 
+type PointerPoint = {
+  x: number
+  y: number
+}
+
+type PinchGesture = {
+  distance: number
+  centerX: number
+  centerY: number
+  scale: number
+  cameraX: number
+  cameraY: number
+}
+
+type GestureMode = 'idle' | 'pan' | 'pinch'
+
 type ZoomPanViewportProps = {
   children: ReactNode
   className?: string
@@ -57,6 +73,16 @@ export function ZoomPanViewport({
   const velocityRef = useRef<Velocity>({ x: 0, y: 0 })
   const draggingRef = useRef(false)
   const pointerRef = useRef({ id: -1, x: 0, y: 0, time: 0 })
+  const activePointersRef = useRef(new Map<number, PointerPoint>())
+  const gestureModeRef = useRef<GestureMode>('idle')
+  const pinchRef = useRef<PinchGesture>({
+    distance: 1,
+    centerX: 0,
+    centerY: 0,
+    scale: 1,
+    cameraX: 0,
+    cameraY: 0,
+  })
 
   const clampScale = useCallback(
     (scale: number) => Math.min(maxScale, Math.max(minScale, scale)),
@@ -184,13 +210,61 @@ export function ZoomPanViewport({
     zoomAt(targetRef.current.scale * zoomFactor, event.clientX, event.clientY)
   }, [zoomAt])
 
+  const beginPinch = useCallback(() => {
+    const viewport = viewportRef.current
+    const points = Array.from(activePointersRef.current.values())
+    if (!viewport || points.length < 2) return false
+
+    const [first, second] = points
+    const dx = second.x - first.x
+    const dy = second.y - first.y
+    const distance = Math.hypot(dx, dy)
+    if (distance < 1) return false
+
+    const rect = viewport.getBoundingClientRect()
+    const centerX = (first.x + second.x) / 2 - (rect.left + rect.width / 2)
+    const centerY = (first.y + second.y) / 2 - (rect.top + rect.height / 2)
+    const target = targetRef.current
+
+    pinchRef.current = {
+      distance,
+      centerX,
+      centerY,
+      scale: target.scale,
+      cameraX: target.x,
+      cameraY: target.y,
+    }
+
+    gestureModeRef.current = 'pinch'
+    draggingRef.current = true
+    velocityRef.current = { x: 0, y: 0 }
+    viewport.dataset.dragging = 'true'
+    ensureAnimation()
+    return true
+  }, [ensureAnimation])
+
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return
+    if (event.pointerType !== 'touch' && event.button !== 0) return
     const viewport = viewportRef.current
     if (!viewport) return
 
-    draggingRef.current = true
+    activePointersRef.current.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY,
+    })
+
+    viewport.setPointerCapture(event.pointerId)
     velocityRef.current = { x: 0, y: 0 }
+
+    if (activePointersRef.current.size === 2) {
+      beginPinch()
+      return
+    }
+
+    if (activePointersRef.current.size > 2) return
+
+    gestureModeRef.current = 'pan'
+    draggingRef.current = true
     pointerRef.current = {
       id: event.pointerId,
       x: event.clientX,
@@ -198,13 +272,48 @@ export function ZoomPanViewport({
       time: performance.now(),
     }
 
-    viewport.setPointerCapture(event.pointerId)
     viewport.dataset.dragging = 'true'
     ensureAnimation()
-  }, [ensureAnimation])
+  }, [beginPinch, ensureAnimation])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!draggingRef.current || event.pointerId !== pointerRef.current.id) return
+    if (!activePointersRef.current.has(event.pointerId)) return
+
+    activePointersRef.current.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY,
+    })
+
+    if (activePointersRef.current.size >= 2) {
+      if (gestureModeRef.current !== 'pinch' && !beginPinch()) return
+
+      const viewport = viewportRef.current
+      const points = Array.from(activePointersRef.current.values())
+      if (!viewport || points.length < 2) return
+
+      const [first, second] = points
+      const distance = Math.hypot(second.x - first.x, second.y - first.y)
+      if (distance < 1) return
+
+      const rect = viewport.getBoundingClientRect()
+      const centerX = (first.x + second.x) / 2 - (rect.left + rect.width / 2)
+      const centerY = (first.y + second.y) / 2 - (rect.top + rect.height / 2)
+      const pinch = pinchRef.current
+      const nextScale = clampScale(pinch.scale * (distance / pinch.distance))
+      const ratio = nextScale / pinch.scale
+      const target = targetRef.current
+
+      // Keep the artwork point under the original pinch midpoint anchored beneath
+      // the moving midpoint. This gives simultaneous pan + zoom without jumps.
+      target.x = centerX - (pinch.centerX - pinch.cameraX) * ratio
+      target.y = centerY - (pinch.centerY - pinch.cameraY) * ratio
+      target.scale = nextScale
+      velocityRef.current = { x: 0, y: 0 }
+      ensureAnimation()
+      return
+    }
+
+    if (gestureModeRef.current !== 'pan' || event.pointerId !== pointerRef.current.id) return
 
     const now = performance.now()
     const previous = pointerRef.current
@@ -228,20 +337,48 @@ export function ZoomPanViewport({
     }
 
     ensureAnimation()
-  }, [ensureAnimation])
+  }, [beginPinch, clampScale, ensureAnimation])
 
   const endPointer = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.pointerId !== pointerRef.current.id) return
+    if (!activePointersRef.current.has(event.pointerId)) return
 
-    draggingRef.current = false
-    viewportRef.current?.removeAttribute('data-dragging')
+    const wasPinching = gestureModeRef.current === 'pinch'
+    activePointersRef.current.delete(event.pointerId)
 
-    if (viewportRef.current?.hasPointerCapture(event.pointerId)) {
-      viewportRef.current.releasePointerCapture(event.pointerId)
+    const viewport = viewportRef.current
+    if (viewport?.hasPointerCapture(event.pointerId)) {
+      viewport.releasePointerCapture(event.pointerId)
     }
 
+    if (activePointersRef.current.size >= 2) {
+      beginPinch()
+      return
+    }
+
+    if (activePointersRef.current.size === 1) {
+      const [remainingId, remaining] = Array.from(activePointersRef.current.entries())[0]
+      gestureModeRef.current = 'pan'
+      draggingRef.current = true
+      velocityRef.current = { x: 0, y: 0 }
+      pointerRef.current = {
+        id: remainingId,
+        x: remaining.x,
+        y: remaining.y,
+        time: performance.now(),
+      }
+      viewport?.setAttribute('data-dragging', 'true')
+      ensureAnimation()
+      return
+    }
+
+    gestureModeRef.current = 'idle'
+    draggingRef.current = false
+    viewport?.removeAttribute('data-dragging')
+
+    // Pinch release should settle in place; single-pointer pans retain inertia.
+    if (wasPinching) velocityRef.current = { x: 0, y: 0 }
     ensureAnimation()
-  }, [ensureAnimation])
+  }, [beginPinch, ensureAnimation])
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {

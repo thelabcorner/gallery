@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import {
-  Aperture,
   ArrowDownToLine,
   ArrowLeft,
   ChevronLeft,
@@ -65,7 +64,14 @@ function Rail({
   return (
     <aside className="rail" data-expanded={expanded}>
       <div className="rail-primary">
-        <button className="brand-mark" type="button" aria-label="SVG Archive home"><Aperture /></button>
+        <button className="brand-mark" type="button" aria-label="SVG Archive home">
+          <svg className="brand-grid" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+            <rect x="6.6" y="6.6" width="8.8" height="8.8" rx="2.1" fill="currentColor" />
+            <rect x="16.6" y="6.6" width="8.8" height="8.8" rx="2.1" fill="currentColor" fillOpacity=".34" />
+            <rect x="6.6" y="16.6" width="8.8" height="8.8" rx="2.1" fill="currentColor" fillOpacity=".34" />
+            <rect className="brand-accent" x="16.6" y="16.6" width="8.8" height="8.8" rx="2.1" fill="#79b8ff" />
+          </svg>
+        </button>
 
         <nav className="rail-icons" aria-label="Archive sections">
           <IconButton label="All works" active={activeCollection === 'All'} onClick={() => setActiveCollection('All')}><Grid2X2 /></IconButton>

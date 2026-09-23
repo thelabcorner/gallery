@@ -179,6 +179,15 @@ input:focus-visible {
   stroke-width: 1.55;
 }
 
+.brand-mark .brand-grid {
+  width: 25px;
+  height: 25px;
+}
+
+.dark .brand-mark .brand-accent {
+  fill: #2f6fd0;
+}
+
 .avatar-dot {
   background: var(--panel-soft);
   border: 1px solid var(--border);
