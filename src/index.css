@@ -1171,6 +1171,18 @@ input:focus-visible {
     height: 34px;
   }
 
+  .brand-mark {
+    overflow: hidden;
+  }
+
+  .brand-mark .brand-grid {
+    width: 28px;
+    height: 28px;
+    max-width: calc(100% - 6px);
+    max-height: calc(100% - 6px);
+    display: block;
+  }
+
   .workspace {
     grid-template-rows: 42px minmax(0, 1fr) 25px;
   }
